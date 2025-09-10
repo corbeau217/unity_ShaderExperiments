@@ -1,0 +1,29 @@
+#define blockWidth 16
+#define blockHeight 16
+#define blockDepth 3
+
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel GrassHeightCS
+
+// ==================================================
+// ==================================================
+
+RWTexture2D<float4> InputHeightMap;
+RWTexture2D<float4> Layer1;
+RWTexture2D<float4> Layer2;
+RWTexture2D<float4> Layer3;
+float4 FillColour;
+float4 ClearColour;
+float Layer1Cutoff;
+float Layer2Cutoff;
+float Layer3Cutoff;
+
+
+[numthreads(blockWidth,blockHeight,blockDepth)]
+void GrassHeightCS (uint3 id : SV_DispatchThreadID)
+{
+    float4 noiseTexel = InputHeightMap[id.xy];
+    Layer1[id.xy] = (noiseTexel.x >= Layer1Cutoff )? FillColour : ClearColour;
+    Layer2[id.xy] = (noiseTexel.x >= Layer2Cutoff )? FillColour : ClearColour;
+    Layer3[id.xy] = (noiseTexel.x >= Layer3Cutoff )? FillColour : ClearColour;
+}
