@@ -14,6 +14,11 @@ public class ComputeShaderManager : MonoBehaviour
     private int lastUsedSeed = -1;
 
     void Start() {
+
+        this.resultRenderTexture = new RenderTexture(this.resultDimensions.x, this.resultDimensions.y, 0);
+        this.resultRenderTexture.enableRandomWrite = true;
+        this.resultRenderTexture.Create();
+
         this.DispatchShader();
     }
     void Update(){
@@ -23,12 +28,8 @@ public class ComputeShaderManager : MonoBehaviour
     }
 
 
-    public void UseComputeShader( ComputeShader computeShader, out RenderTexture renderTexture ){
+    public void UseComputeShader( ComputeShader computeShader, RenderTexture renderTexture ){
         int kernelIndex = computeShader.FindKernel(this.shaderKernelName);
-        
-        renderTexture = new RenderTexture(this.resultDimensions.x, this.resultDimensions.y, 0);
-        renderTexture.enableRandomWrite = true;
-        renderTexture.Create();
 
         // Set all the necessary buffers
         computeShader.SetInt("textureWidth", this.resultDimensions.x);
@@ -41,6 +42,6 @@ public class ComputeShaderManager : MonoBehaviour
     }
     public void DispatchShader(){
         this.lastUsedSeed = this.randomSeed;
-        this.UseComputeShader(this.csToUse, out this.resultRenderTexture);
+        this.UseComputeShader(this.csToUse, this.resultRenderTexture);
     }
 }

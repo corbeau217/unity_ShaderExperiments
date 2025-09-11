@@ -10,8 +10,12 @@ public class ComputeShaderUserTest : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
+
+        this.resultRenderTexture = new RenderTexture(computeShaderResultDimensions.x, computeShaderResultDimensions.y, 0);
+        this.resultRenderTexture.enableRandomWrite = true;
+        this.resultRenderTexture.Create();
         // ...
-        this.UseComputeShader(this.usingComputeShader, out this.resultRenderTexture);
+        this.UseComputeShader(this.usingComputeShader, this.resultRenderTexture);
     }
 
     // Update is called once per frame
@@ -19,16 +23,11 @@ public class ComputeShaderUserTest : MonoBehaviour
     {
         // ...
     }
-    public void UseComputeShader(ComputeShader computeShader,out RenderTexture renderTexture){
+    public void UseComputeShader(ComputeShader computeShader, RenderTexture renderTexture){
         // ...
         int kernelIndex = computeShader.FindKernel("ComputeShaderTestable");
         int blockWidth = 32;
         int blockHeight = 16;
-
-        renderTexture = new RenderTexture(computeShaderResultDimensions.x, computeShaderResultDimensions.y, 0);
-        renderTexture.enableRandomWrite = true;
-        renderTexture.Create();
-
 
         // Set all the necessary buffers
         computeShader.SetInt("textureWidth", computeShaderResultDimensions.x);

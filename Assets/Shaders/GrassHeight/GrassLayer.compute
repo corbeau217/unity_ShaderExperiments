@@ -1,0 +1,34 @@
+#define blockWidth 16
+#define blockHeight 16
+#define blockDepth 1
+
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel GrassLayer
+
+// ==================================================
+// ==================================================
+
+RWTexture2D<float4> OutputLayer;
+float2 CellSize;
+float2 CellMargin;
+float4 FillColour;
+float4 ClearColour;
+float LayerHeight;
+
+
+
+
+[numthreads(blockWidth,blockHeight,blockDepth)]
+void GrassLayer (uint3 id : SV_DispatchThreadID)
+{
+    float2 location = float2(id.x, id.y);
+    float2 usingCellSize = CellSize+CellMargin;
+    float2 gridLocation = float2(location.x/usingCellSize.x, location.y/usingCellSize.y);
+    float2 cellLocation = float2(frac(gridLocation.x),frac(gridLocation.y));
+    float2 gridRelativeLocation = float2(abs(cellLocation.x-0.5)*2.0,abs(cellLocation.y-0.5)*2.0);
+    float distFromGridPoint = length(gridRelativeLocation);
+    float mixering = (1.0 - LayerHeight)*distFromGridPoint;
+    mixering = ((mixering>1.0)?1.0:mixering);
+
+    OutputLayer[id.xy] = lerp(ClearColour,FillColour,mixering);
+}
