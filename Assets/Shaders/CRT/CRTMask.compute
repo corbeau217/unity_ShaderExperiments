@@ -1,0 +1,78 @@
+#define blockWidth 16
+#define blockHeight 16
+#define blockDepth 1
+
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CRTMask
+
+// ==================================================
+// ==================================================
+
+
+RWTexture2D<float4> OutputMask;
+int textureWidth;
+int textureHeight;
+
+#define borderColour float4(0.0,0.0,0.0,1.0)
+#define stripR float4(1.0,0.0,0.0,1.0)
+#define stripG float4(0.0,1.0,0.0,1.0) 
+#define stripB float4(0.0,0.0,1.0,1.0)
+
+// 8 by 8 pattern
+//  outer ring is all black,
+//  then we have a 2x6 of each colour
+float4 GetPatternColour(uint2 patternLocation){
+    // test vertical borders
+    if(patternLocation.y == 0 || patternLocation.y == 7){
+        return borderColour;
+    }
+    else{
+        // test horizontal
+        [flatten] switch(patternLocation.x)
+        {
+            //border
+            case 0:
+                return borderColour; 
+            // red
+            case 1:
+            case 2:
+                return stripR;  
+            // green
+            case 3:
+            case 4:
+                return stripG;  
+            // blue
+            case 5:
+            case 6:
+                return stripB;  
+            // border
+            default:
+                return borderColour; 
+        }
+    }
+}
+
+
+[numthreads(blockWidth,blockHeight,blockDepth)]
+void CRTMask (uint3 id : SV_DispatchThreadID)
+{
+    uint2 cellSize = uint2(8,8);
+    uint2 cellLocation = uint2(id.x%cellSize.x, id.y%cellSize.y);
+    uint2 gridLocation = uint2(id.x/cellSize.x, id.y/cellSize.y);
+
+    int isOverhang = 0;
+    // when every second column, we offset the y by half
+    if( (gridLocation.x)%2==1 ){
+        cellLocation.y = (cellLocation.y + (cellSize.y/2)) % cellSize.y;
+        if((id.y-cellLocation.y)+8 > (uint)textureHeight || (int)id.y-(int)cellLocation.y < 0){
+            isOverhang = 1;
+        }
+    }
+
+    if(isOverhang){
+        OutputMask[id.xy] = borderColour;
+    }
+    else {
+        OutputMask[id.xy] = GetPatternColour(cellLocation);
+    }
+}

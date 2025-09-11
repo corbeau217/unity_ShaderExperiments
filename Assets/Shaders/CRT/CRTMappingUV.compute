@@ -1,0 +1,75 @@
+#define blockWidth 16
+#define blockHeight 16
+#define blockDepth 1
+
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CRTMappingUV
+
+// ==================================================
+// ==================================================
+
+#define borderUV float4(0.0,0.0,0.0,1.0)
+
+RWTexture2D<float4> UVMappingTexture;
+int textureWidth;
+int textureHeight;
+
+
+
+[numthreads(blockWidth,blockHeight,blockDepth)]
+void CRTMappingUV (uint3 id : SV_DispatchThreadID)
+{
+    uint2 cellSize = uint2(8,8);
+    uint2 cellLocation = uint2(id.x%cellSize.x, id.y%cellSize.y);
+    uint2 gridLocation = uint2(id.x/cellSize.x, id.y/cellSize.y);
+
+    // when every second column, we offset the y by half
+    if( (gridLocation.x)%2==1 ){
+        cellLocation.y = (cellLocation.y + (cellSize.y/2)) % cellSize.y;
+    }
+
+    // figure out if border
+    if((cellLocation.y == 0 || cellLocation.y == 7)||(cellLocation.x == 0 || cellLocation.x == 7)){
+        UVMappingTexture[id.xy] = borderUV;
+    }
+    else{
+        uint2 cellUVOffset = uint2(0,0);
+        // otherwise figure out our slice origin
+        [flatten] switch(cellLocation.x)
+        {
+            //border
+            case 0:
+                cellUVOffset = uint2(0,0); 
+                break;
+            // red
+            case 1:
+            case 2:
+                cellUVOffset = uint2(1,1);  
+                break;
+            // green
+            case 3:
+            case 4:
+                cellUVOffset = uint2(3,1);  
+                break;
+            // blue
+            case 5:
+            case 6:
+                cellUVOffset = uint2(5,1);  
+                break;
+            // border
+            default:
+                cellUVOffset = uint2(0,0); 
+                break;
+        }
+        uint2 cellOrigin = id.xy - cellLocation;
+        uint2 cellUV = cellOrigin+cellUVOffset;
+        
+        // handle overhang
+        if(((int)id.y - (int)cellLocation.y) < 0 || ((int)cellOrigin.y + 8) > textureHeight){
+            UVMappingTexture[id.xy] = borderUV;
+        }
+        else{
+            UVMappingTexture[id.xy] = float4((1.0*cellUV.x/textureWidth), (1.0*cellUV.y/textureHeight), 0.0, 1.0);
+        }
+    }
+}

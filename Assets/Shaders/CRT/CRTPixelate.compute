@@ -1,0 +1,56 @@
+#define blockWidth 16
+#define blockHeight 16
+#define blockDepth 1
+
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CRTPixelate
+
+// ==================================================
+// ==================================================
+
+
+#define borderColour float4(0.0,0.0,0.0,1.0)
+
+Texture2D<float4> InputTexture;
+RWTexture2D<float4> ChannelMaskingTexture;
+RWTexture2D<float4> UVMappingTexture;
+RWTexture2D<float4> OutputTexture;
+
+int textureWidth;
+int textureHeight;
+
+[numthreads(blockWidth,blockHeight,blockDepth)]
+void CRTPixelate (uint3 id : SV_DispatchThreadID)
+{
+    float4 UVInput = UVMappingTexture[id.xy];
+    float4 channelMaskInput = ChannelMaskingTexture[id.xy];
+    int2 texCoord = int2((UVInput.x*textureWidth),(UVInput.y*textureHeight));
+
+    // when border
+    if(texCoord.x==0 || texCoord.y == 0){
+        OutputTexture[id.xy] = borderColour;
+    }
+    else {
+        // gather our rgbs in the area
+        float3 accumulatedColour = float3(0.0,0.0,0.0);
+        accumulatedColour = accumulatedColour + InputTexture[int2(  texCoord.x,  texCoord.y)].xyz;
+        accumulatedColour = accumulatedColour + InputTexture[int2(  texCoord.x,1+texCoord.y)].xyz;
+        accumulatedColour = accumulatedColour + InputTexture[int2(  texCoord.x,2+texCoord.y)].xyz;
+        accumulatedColour = accumulatedColour + InputTexture[int2(  texCoord.x,3+texCoord.y)].xyz;
+        accumulatedColour = accumulatedColour + InputTexture[int2(  texCoord.x,4+texCoord.y)].xyz;
+        accumulatedColour = accumulatedColour + InputTexture[int2(  texCoord.x,5+texCoord.y)].xyz;
+        accumulatedColour = accumulatedColour + InputTexture[int2(1+texCoord.x,  texCoord.y)].xyz;
+        accumulatedColour = accumulatedColour + InputTexture[int2(1+texCoord.x,1+texCoord.y)].xyz;
+        accumulatedColour = accumulatedColour + InputTexture[int2(1+texCoord.x,2+texCoord.y)].xyz;
+        accumulatedColour = accumulatedColour + InputTexture[int2(1+texCoord.x,3+texCoord.y)].xyz;
+        accumulatedColour = accumulatedColour + InputTexture[int2(1+texCoord.x,4+texCoord.y)].xyz;
+        accumulatedColour = accumulatedColour + InputTexture[int2(1+texCoord.x,5+texCoord.y)].xyz;
+        // average as output
+        OutputTexture[id.xy] = float4(
+            (accumulatedColour.x/12.0)*channelMaskInput.x,
+            (accumulatedColour.y/12.0)*channelMaskInput.y,
+            (accumulatedColour.z/12.0)*channelMaskInput.z,
+            1.0
+        );
+    }
+}
