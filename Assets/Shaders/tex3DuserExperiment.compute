@@ -1,0 +1,18 @@
+#define block32Width 16
+#define block32Height 16
+
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel tex3DuserExperiment
+
+
+RWTexture3D<float4> InputTexture;
+RWTexture2D<float4> OutputTexture;
+int textureSlice;
+
+[numthreads(block32Width,block32Height,1)]
+void tex3DuserExperiment (uint3 id : SV_DispatchThreadID)
+{
+    uint3 texelCoords = uint3(id.x, id.y, (uint)textureSlice);
+    float3 texelColour = InputTexture[texelCoords].xyz;
+    OutputTexture[id.xy] = float4(texelColour.x, texelColour.y, texelColour.z, 1.0f);
+}

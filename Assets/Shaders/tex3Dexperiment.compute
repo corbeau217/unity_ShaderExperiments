@@ -1,0 +1,23 @@
+#define block3DWidth 8
+#define block3DHeight 8
+#define block3DDepth 8
+
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel tex3Dexperiment
+
+
+RWTexture3D<float4> OutputTexture;
+uint textureWidth;
+uint textureHeight;
+uint textureDepth;
+
+[numthreads(block3DWidth,block3DHeight,block3DDepth)]
+void tex3Dexperiment (uint3 id : SV_DispatchThreadID)
+{
+    float3 texelColour = float3(
+        ((float)(id.x))/((float)textureWidth),
+        ((float)(id.y))/((float)textureHeight),
+        ((float)(id.z))/((float)textureDepth)
+    );
+    OutputTexture[id.xyz] = float4(texelColour.x, texelColour.y, texelColour.z, 1.0f);
+}
