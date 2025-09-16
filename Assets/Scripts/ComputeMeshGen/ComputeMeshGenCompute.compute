@@ -1,0 +1,89 @@
+#define block3DWidth 16
+#define block3DHeight 16
+#define block3DDepth 1
+
+#define floatsPerVertex 6
+#define floatsPerVector 3
+
+#define indicesPerTriangle 3
+
+#define sizeOfFloat 4
+#define sizeOfUInt 4
+
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel computeMeshGenExampleKernel
+
+// #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Macros.hlsl"
+// #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Random.hlsl"
+
+RWByteAddressBuffer meshVertices;
+RWByteAddressBuffer meshTriangleBindings;
+uint vertexCountX;
+uint vertexCountY;
+// uint totalVertices;
+
+void writeVertexData(uint vertexIndex, float3 vertPosition, float3 vertNormal){
+    // uint bufferSizeInBytes;
+    // meshVertices.GetDimensions(bufferSizeInBytes);
+    // if(vertexIndex >= (bufferSizeInBytes * floatsPerVertex * sizeOfFloat)){
+    //     return;
+    // }
+    // figure our the locations of our data
+    uint addressOfPosition = (vertexIndex) * (floatsPerVertex * sizeOfFloat);
+    uint addressOfNormal = (addressOfPosition) + (floatsPerVector * sizeOfFloat);
+    // write them to the buffer
+    meshVertices.Store3(addressOfPosition, asuint(vertPosition));
+    meshVertices.Store3(addressOfNormal, asuint(vertNormal));
+}
+void writeTriangleData(uint triangleIndex, uint3 triangleBindings){
+    // uint bufferSizeInBytes;
+    // meshTriangleBindings.GetDimensions(bufferSizeInBytes);
+    // if(triangleIndex >= (bufferSizeInBytes * indicesPerTriangle * sizeOfUInt)){
+    //     return;
+    // }
+    uint triangleByteAddress = triangleIndex*indicesPerTriangle*sizeOfUInt;
+    meshTriangleBindings.Store3(triangleByteAddress, triangleBindings);
+}
+
+[numthreads(block3DWidth,block3DHeight,1)]
+void computeMeshGenExampleKernel (uint3 id : SV_DispatchThreadID)
+{
+    // figure out where we exist in the quad
+    uint vertexIndexBL = ((id.y)*(vertexCountX))+(id.x);
+    // if(vertexIndexBL >= totalVertices) return;
+    // now generate the location to save
+    float3 vertPos = float3(
+        (((float)id.x)/(vertexCountX)),
+        0.0,
+        (((float)id.y)/(vertexCountY))
+    );
+    // make the normal just point up
+    float3 vertNorm = float3(
+        0.0,
+        1.0,
+        0.0
+    );
+    // save our value
+    writeVertexData(vertexIndexBL, vertPos, vertNorm);
+
+    // not on the last row/column of vertices
+    if(((id.x)<(vertexCountX-1))&&((id.y)<(vertexCountY-1))){
+        // prepare the other vertex locations
+        uint vertexIndexBR = ((id.y)*(vertexCountX))+(id.x+1);
+        uint vertexIndexTL = ((id.y+1)*(vertexCountX))+(id.x);
+        uint vertexIndexTR = ((id.y+1)*(vertexCountX))+(id.x+1);
+        // our quad index is the bottom left vertex index
+        //  and our triangle index is which of the two we're on
+        uint quadFirsTriangle = vertexIndexBL*2;
+        writeTriangleData(quadFirsTriangle, uint3(
+            vertexIndexBR,
+            vertexIndexBL,
+            vertexIndexTR
+        ));
+        writeTriangleData(quadFirsTriangle+1, uint3(
+            vertexIndexBL,
+            vertexIndexTL,
+            vertexIndexTR
+        ));
+    }
+}

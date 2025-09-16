@@ -7,6 +7,9 @@ public class Tex3DExperiment : MonoBehaviour
     public ComputeShader tex3DGenerationShader;
     public ComputeShader tex2DUsageShader;
     public Vector3Int dimensions3D = Vector3Int.one * 256;
+    // multiply the dimensions 3d by the squareroot of one of the dimensions
+    //  since the 3rd axis ends up being each slice of the volume
+    //  spread out in a square grid upon saving
     public Vector2Int dimensions3DAs2D = Vector2Int.one * 256 * 16;
     public Vector2Int dimensions2D = Vector2Int.one * 256;
     public Renderer rendererPreview;
