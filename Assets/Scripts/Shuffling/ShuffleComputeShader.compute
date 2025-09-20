@@ -1,0 +1,79 @@
+#define blockWidth 16
+#define blockHeight 16
+
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CyclicalShuffleKernel
+#pragma kernel FillWithUVColoursKernel
+
+
+RWTexture2D<float4> PreviewSliceTexture;
+RWTexture3D<float4> SwapDataTexture;
+
+// xy are the width/height of each slice, z is how many slices for swapping
+uint3 volumeDimensions;
+// xy are location and zw are width and height
+uint4 cycleRectangle;
+// how much to offset on our axises when the swap happens
+// x and y apply to all in the rectangle indices
+uint2 cycleAxisOffsets;
+// the slice we're saving the cycling operation to
+uint currentSliceIndex;
+
+[numthreads(blockWidth,blockHeight,1)]
+void CyclicalShuffleKernel (uint3 id : SV_DispatchThreadID)
+{
+    // ================================================
+    // === step 1
+    // =     figure out if we're in the rectangle
+    // =     and cycle our slice location if we are
+
+    // this is incase we're on 0
+    uint previousSliceIndex = (volumeDimensions.z + (currentSliceIndex-1)) % volumeDimensions.z;
+    // where to take from, default to not being in the cycle rectangle
+    uint3 takingFromLocation = uint3(id.x, id.y, previousSliceIndex);
+    // find out if we actually are then handle that scenario
+    if( 
+        ((id.x >= cycleRectangle.x) && (id.x < (cycleRectangle.x+cycleRectangle.z))) && 
+        ((id.y >= cycleRectangle.y) && (id.y < (cycleRectangle.y+cycleRectangle.w)))
+    ){
+        // cycle just in the rectangle
+        uint2 newLocationInCycleRectangle = uint2(
+            ((id.x - cycleRectangle.x) + cycleAxisOffsets.x) % cycleRectangle.z,
+            ((id.y - cycleRectangle.y) + cycleAxisOffsets.y) % cycleRectangle.w
+        );
+        // add the rectangle location and wrap when we go over the volume size
+        takingFromLocation.x = (cycleRectangle.x + newLocationInCycleRectangle.x) % volumeDimensions.x;
+        takingFromLocation.y = (cycleRectangle.y + newLocationInCycleRectangle.y) % volumeDimensions.y;
+    }
+
+    // ================================================
+    // === step 2
+    // =     update the current layer based on what
+    // =     was in the previous layer using cycled idx
+    // =     and also save the current layer pixels to
+    // =     our preview texture
+
+    // float4 cycledPreviousValue = SwapDataTexture[takingFromLocation.xyz];
+
+    SwapDataTexture[id.xyz] = SwapDataTexture[takingFromLocation.xyz];
+    PreviewSliceTexture[id.xy] = SwapDataTexture[takingFromLocation.xyz];
+
+    // ================================================
+}
+
+
+[numthreads(blockWidth,blockHeight,1)]
+void FillWithUVColoursKernel (uint3 id : SV_DispatchThreadID)
+{
+    // filling in texel
+    uint3 updatingLocation = uint3(id.x, id.y, currentSliceIndex);
+    // generate the colour
+    float4 texelUVColour = float4(
+        (1.0 * id.x)/(1.0 * volumeDimensions.x),
+        (1.0 * id.y)/(1.0 * volumeDimensions.y),
+        0.0,
+        1.0
+    );
+    // and save it
+    SwapDataTexture[updatingLocation] = texelUVColour;
+}
