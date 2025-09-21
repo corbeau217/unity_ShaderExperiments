@@ -37,10 +37,12 @@ public class PerlinNoiseShaderController : MonoBehaviour
     void Start(){
         this.GenerateRenderTexture();
 
-        this.PerformInputNoiseShader();
-        this.PerformPerlinShader();
+        // this.PerformInputNoiseShader();
+        // this.PerformPerlinShader();
     }
     void Update(){
+        this.PerformInputNoiseShader();
+        this.PerformPerlinShader();
         SetRenderersMainTextureTo(inputNoisePreviewRenderer, inputNoiseTexture);
         SetRenderersMainTextureTo(perlinViewRenderer, outputPerlinTexture);
     }
@@ -117,6 +119,10 @@ public class PerlinNoiseShaderController : MonoBehaviour
         perlinOutputResolutionArray[0] = perlinOutputResolution.x;
         perlinOutputResolutionArray[1] = perlinOutputResolution.y;
 
+        int[] inputNoiseResolutionArray = new int[2];
+        inputNoiseResolutionArray[0] = inputNoiseResolution.x;
+        inputNoiseResolutionArray[1] = inputNoiseResolution.y;
+
         // figure out the dispatch counts
         //  we do this firs so that the dispatch line is cleaner
         //  this will be the number of blocks per axis
@@ -157,6 +163,8 @@ public class PerlinNoiseShaderController : MonoBehaviour
 
         perlinNoiseShader.SetTexture(perlinKernelIndex, "inputNoiseTexture", inputNoiseTexture);
         perlinNoiseShader.SetTexture(perlinKernelIndex, "outputPerlinTexture", outputPerlinTexture);
+
+        perlinNoiseShader.SetInts("inputNoiseResolution", inputNoiseResolutionArray);
         perlinNoiseShader.SetInts("perlinOutputResolution", perlinOutputResolutionArray);
 
         perlinNoiseShader.SetInts("octaveCellSizes", octaveCellSizesArray);

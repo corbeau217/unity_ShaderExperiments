@@ -7,9 +7,11 @@
 
 // pi to 24 significant figures
 //                3.14159265358979323846264338327950288419716939937510582097494459230781640628
-#define F_PI_24SF 3.141592653589793238462643
+#define F_PI_24SF 3.141592
+// 653589793238462643
 // tau (2*pi) to 24 significant figures
-#define F_TAU_24SF 6.283185307179586476925287
+#define F_TAU_24SF 6.283185
+// 307179586476925287
 
 #define I_Maximum_Octaves 4
 
@@ -37,6 +39,7 @@ int2 perlinOutputResolution;
 int2 octaveCellSizes[I_Maximum_Octaves];
 int2 octaveCellOffsets[I_Maximum_Octaves];
 float octaveInfluences[I_Maximum_Octaves];
+
 int octaveLayerUsageCount;
 
 // ====================================================================================
@@ -73,17 +76,19 @@ float2 cornerToFrag(float2 whereInTheCell, uint2 cornerOffset){
     return whereInTheCell - cornerVec;
 }
 float2 cellCornerVector(float2 cellCoords, uint2 indexOffset){
+    int cellIndex_x = (int)floor(cellCoords.x);
+    int cellIndex_y = (int)floor(cellCoords.y);
+    int offsetIndex_x = cellIndex_x + (int)indexOffset.x;
+    int offsetIndex_y = cellIndex_x + (int)indexOffset.y;
+
     // turn it in to a cell location
     //  wrapping around when we're at the end
-    uint2 cornerTexel = uint2(
-        (((uint)floor(cellCoords.x))+indexOffset.x) % ((uint)inputNoiseResolution.x),
-        (((uint)floor(cellCoords.y))+indexOffset.y) % ((uint)inputNoiseResolution.y)
-    );
+    uint2 cornerTexel = uint2( offsetIndex_x % inputNoiseResolution.x, offsetIndex_y % inputNoiseResolution.y );
     // TODO : grab yz as an already figured out and saved point on the circle
     // grab that noise value
-    float noiseSample = inputNoiseTexture[cornerTexel.xy].x;
+    float4 noiseSample = inputNoiseTexture[cornerTexel.xy];
     // make it a vector
-    float2 sampledNoiseVector = pointOnCircle( noiseSample );
+    float2 sampledNoiseVector = pointOnCircle( noiseSample.x );
     return sampledNoiseVector;
 }
 // this is the smooth step function
@@ -197,13 +202,18 @@ void PerlinNoiseKernel (uint3 id : SV_DispatchThreadID)
     float2 layer3_fragCoord = (texelLocation / layer3_cellSize) + layer3_offset;
 
     float layer0_noise = noiseForLayer(layer0_fragCoord);
+    layer0_noise *= octaveInfluences[0];
     float layer1_noise = noiseForLayer(layer1_fragCoord);
+    layer1_noise *= octaveInfluences[1];
     float layer2_noise = noiseForLayer(layer2_fragCoord);
+    layer2_noise *= octaveInfluences[2];
     float layer3_noise = noiseForLayer(layer3_fragCoord);
+    layer3_noise *= octaveInfluences[3];
 
-    float combinedNoise = ((octaveInfluences[0] * layer0_noise) + (octaveInfluences[1] * layer1_noise) + (octaveInfluences[2] * layer2_noise) + (octaveInfluences[3] * layer3_noise));
+    float combinedNoise = (layer0_noise + layer1_noise + layer2_noise + layer3_noise);
+    combinedNoise /= 1.875;
 
-    float totalInfluence = octaveInfluences[0] + octaveInfluences[1] + octaveInfluences[2] + octaveInfluences[3];
+    // float totalInfluence = ( octaveInfluences[0] + octaveInfluences[1] + octaveInfluences[2] + octaveInfluences[3] );
 
 
     // ==================================================
@@ -218,62 +228,57 @@ void PerlinNoiseKernel (uint3 id : SV_DispatchThreadID)
     // 
     //  probably could macro the this with preprocessor
 
-    int debugFlag_octaveCountTooSmall = ( octaveLayerUsageCount <= 0 )?1:0;
-    int debugFlag_totalInfluenceZero = ( totalInfluence <= F_Float_Forgiveness )?1:0;
-    int debugFlag_combinedNoiseLessThanMinumum = ( combinedNoise < F_Minimum_Noise_Value )?1:0;
-    int debugFlag_anyFlagSet = ( ( debugFlag_octaveCountTooSmall != 0 )||( debugFlag_totalInfluenceZero != 0 )||( debugFlag_combinedNoiseLessThanMinumum != 0 ) )?1:0;
-    // for debugging our spooky situations
-    float4 debugStatusColour = float4(
-        debugFlag_octaveCountTooSmall,
-        debugFlag_totalInfluenceZero,
-        debugFlag_combinedNoiseLessThanMinumum,
-        debugFlag_anyFlagSet
-    );
+    // int debugFlag_octaveCountTooSmall = ( octaveLayerUsageCount <= 0 )?1:0;
+    // int debugFlag_totalInfluenceZero = ( totalInfluence <= F_Float_Forgiveness )?1:0;
+    // int debugFlag_combinedNoiseLessThanMinumum = ( combinedNoise < F_Minimum_Noise_Value )?1:0;
+    // int debugFlag_anyFlagSet = ( ( debugFlag_octaveCountTooSmall != 0 )||( debugFlag_totalInfluenceZero != 0 )||( debugFlag_combinedNoiseLessThanMinumum != 0 ) )?1:0;
+    // // for debugging our spooky situations
+    // float4 debugStatusColour = float4(
+    //     debugFlag_octaveCountTooSmall,
+    //     debugFlag_totalInfluenceZero,
+    //     debugFlag_combinedNoiseLessThanMinumum,
+    //     debugFlag_anyFlagSet
+    // );
 
 
     // ==================================================
 
-    // --------------------------------------------------------
-    // check for debug mode
-    if( isDebugMode != 0 ){
-        // .....................................
+    // // --------------------------------------------------------
+    // // check for debug mode
+    // if( isDebugMode != 0 ){
+    //     // .....................................
 
-        // output debug colour
-        outputPerlinTexture[id.xy] = debugStatusColour;
+    //     // output debug colour
+    //     outputPerlinTexture[id.xy] = debugStatusColour;
 
-        // .....................................
-    }
-    // --------------------------------------------------------
-    // otherwise not debug mode
-    else {
-        // .....................................
+    //     // .....................................
+    // }
+    // // --------------------------------------------------------
+    // // otherwise not debug mode
+    // else {
+    //     // .....................................
 
-        // check for spooky total influence
-        if( debugFlag_totalInfluenceZero != 0 && combinedNoise > 0 ){
-            // save standard combined
-            outputPerlinTexture[id.xy] = float4(
-                combinedNoise,
-                combinedNoise,
-                combinedNoise,
-                1.0
-            );
-        }
-        // otherwise use squashed noise
-        else {
+    //     // check for spooky total influence
+    //     if( debugFlag_totalInfluenceZero != 0 && combinedNoise > 0 ){
+    //         // save standard combined
+    //         outputPerlinTexture[id.xy] = float4(
+    //             combinedNoise,
+    //             combinedNoise,
+    //             combinedNoise,
+    //             1.0
+    //         );
+    //     }
+    //     // otherwise use squashed noise
+    //     else {
             // squash it to be between -1 and 1
             //  then shift the range to be 0 to 1
-            float repositionedNoise = ((combinedNoise / totalInfluence) + 1.0) / 2.0;
+            float repositionedNoise = (combinedNoise+1.0) / 2.0;
             // save it to our output
-            outputPerlinTexture[id.xy] = float4(
-                repositionedNoise,
-                repositionedNoise,
-                repositionedNoise,
-                1.0
-            );
-        }
+            outputPerlinTexture[id.xy] = float4( combinedNoise, combinedNoise, combinedNoise, 1.0 );
+    //     }
 
-        // .....................................
-    }
+    //     // .....................................
+    // }
     // --------------------------------------------------------
 
     // ==================================================
