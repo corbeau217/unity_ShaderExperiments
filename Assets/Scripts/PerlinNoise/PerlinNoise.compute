@@ -1,0 +1,179 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel InputNoiseKernel
+#pragma kernel PerlinNoiseKernel
+
+// pi to 24 significant figures
+#define pi_24sf 3.141592653589793238462643 //38327950288419716939937510582097494459230781640628
+// tau (2*pi) to 24 significant figures
+#define tau_24sf 6.283185307179586476925287
+
+#define maximum_octaves 4
+
+#define index_offset_bottom_left uint2(0,0)
+#define index_offset_bottom_right uint2(1,0)
+#define index_offset_top_left uint2(0,1)
+#define index_offset_top_right uint2(1,1)
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> inputNoiseTexture;
+RWTexture2D<float4> outputPerlinTexture;
+
+int2 inputNoiseResolution;
+int2 perlinOutputResolution;
+
+int2 octaveCellSizes[maximum_octaves];
+int octaveCount;
+
+// ====================================================================================
+// ====================================================================================
+
+// seems the common way to generate random values
+float randomValue(float2 uvCoordinates){
+    return frac(sin(dot(uvCoordinates, float2(12.9898, 78.233)))*43758.5453);
+}
+
+// circleT is between 0.0 and 1.0 inclusive, as a rotation around a full circle
+float2 pointOnCircle(float circleT){
+    float radiansT = circleT * tau_24sf;
+    // for now just use trig, whomst even care
+    return float2(cos(radiansT),sin(radiansT));
+}
+
+// ====================================================================================
+// ====================================================================================
+
+float2 cellCoords(float2 texelCoord, float2 layerCellSize, float2 layerOrigin){
+    return float2(
+        (texelCoord.x / layerCellSize.x) + layerOrigin.x,
+        (texelCoord.y / layerCellSize.y) + layerOrigin.y
+    );
+}
+float2 cornerToFrag(float2 whereInTheCell, uint2 cornerOffset){
+    // convert to float2
+    float2 cornerVec = float2(
+        cornerOffset.x,
+        cornerOffset.y
+    );
+    // give back the difference
+    return whereInTheCell - cornerVec;
+}
+float2 cellCornerVector(float2 cellCoords, uint2 indexOffset){
+    // turn it in to a cell location
+    //  wrapping around when we're at the end
+    uint2 cornerTexel = uint2(
+        (((uint)floor(cellCoords.x))+indexOffset.x) % ((uint)inputNoiseResolution.x),
+        (((uint)floor(cellCoords.y))+indexOffset.y) % ((uint)inputNoiseResolution.y)
+    );
+    // grab that noise value
+    float noiseSample = inputNoiseTexture[cornerTexel.xy].x;
+    // make it a vector
+    float2 sampledNoiseVector = pointOnCircle( noiseSample );
+    return sampledNoiseVector;
+}
+// this is the smooth step function
+//  it's already defined in hlsl, and most perlin noise versions call this
+//  the smooth or fade function
+float hermiteInterpolation(float leftValue, float rightValue, float t){
+    //  same as:
+    //      6*t*t*t*t*t - 15*t*t*t*t + 10*t*t*t
+    //  but with less multiplication operations
+    float hermiteT = ((6*t - 15)*t + 10)*t*t*t;
+    // do the interpolation
+    return lerp(leftValue, rightValue, hermiteT);
+}
+
+// ====================================================================================
+// ====================================================================================
+
+[numthreads(16,16,1)]
+void InputNoiseKernel (uint3 id : SV_DispatchThreadID)
+{
+    // convert to floats, we dont like doing that mid equation?
+    float2 texelLocation = float2( id.x, id.y);
+    float2 outputResolution = float2( inputNoiseResolution.x, inputNoiseResolution.y);
+
+    // find where we are in the noise texture space
+    float2 uvCoords = float2( (texelLocation.x / outputResolution.x), (texelLocation.y / outputResolution.y) );
+    
+    // generate
+    float noiseValue = randomValue(uvCoords);
+    float4 noiseColour = float4( noiseValue, noiseValue, noiseValue, 1.0 );
+
+    // save it
+    inputNoiseTexture[id.xy] = noiseColour;
+}
+
+// ====================================================================================
+// ====================================================================================
+
+[numthreads(16,16,1)]
+void PerlinNoiseKernel (uint3 id : SV_DispatchThreadID)
+{
+    // ==================================================
+
+    // convert to floats, we dont like doing that mid equation?
+    float2 texelLocation = float2( id.x, id.y);
+    float2 outputResolution = float2( inputNoiseResolution.x, inputNoiseResolution.y);
+
+    // find where we are in the noise texture space
+    float2 uvCoords = float2( (texelLocation.x / outputResolution.x), (texelLocation.y / outputResolution.y) );
+
+    // ==================================================
+    // TODO : move the vector making to input noise gen
+    // TODO : handle layer offsets
+    // TODO : handle wrapping the layer texel coords
+
+    float2 layer0_texelCoord = cellCoords( texelLocation, octaveCellSizes[0], float2(0.0,0.0));
+
+    // ==================================================
+    
+    // find where in the cell
+
+    float2 layer0_whereInTheCell = float2( frac(layer0_texelCoord.x), frac(layer0_texelCoord.y) );
+
+    // what are our corner vectors
+
+    float2 layer0_cornerToFragVector_bottom_left = cornerToFrag(layer0_whereInTheCell, index_offset_bottom_left);
+    float2 layer0_cornerToFragVector_bottom_right = cornerToFrag(layer0_whereInTheCell, index_offset_bottom_right);
+    float2 layer0_cornerToFragVector_top_left = cornerToFrag(layer0_whereInTheCell, index_offset_top_left);
+    float2 layer0_cornerToFragVector_top_right = cornerToFrag(layer0_whereInTheCell, index_offset_top_right);
+
+    // what are our corner vectors
+
+    float2 layer0_cornerVector_bottom_left = cellCornerVector(layer0_texelCoord, index_offset_bottom_left);
+    float2 layer0_cornerVector_bottom_right = cellCornerVector(layer0_texelCoord, index_offset_bottom_right);
+    float2 layer0_cornerVector_top_left = cellCornerVector(layer0_texelCoord, index_offset_top_left);
+    float2 layer0_cornerVector_top_right = cellCornerVector(layer0_texelCoord, index_offset_top_right);
+
+    // dot product our corner vectors and corner to frag vectors
+
+    float layer0_dotProduct_bottom_left = dot( layer0_cornerToFragVector_bottom_left, layer0_cornerVector_bottom_left );
+    float layer0_dotProduct_bottom_right = dot( layer0_cornerToFragVector_bottom_right, layer0_cornerVector_bottom_right );
+    float layer0_dotProduct_top_left = dot( layer0_cornerToFragVector_top_left, layer0_cornerVector_top_left );
+    float layer0_dotProduct_top_right = dot( layer0_cornerToFragVector_top_right, layer0_cornerVector_top_right );
+
+    // then do interpolation
+    //  we'd do smooth step here to reduce edge weirdness
+    
+    float layer0_dotProduct_bottom = hermiteInterpolation(layer0_dotProduct_bottom_left, layer0_dotProduct_bottom_right, layer0_whereInTheCell.x);
+    float layer0_dotProduct_top = hermiteInterpolation(layer0_dotProduct_top_left, layer0_dotProduct_top_right, layer0_whereInTheCell.x);
+
+    float layer0_dotProduct_vertical = hermiteInterpolation(layer0_dotProduct_bottom, layer0_dotProduct_top, layer0_whereInTheCell.y);
+
+    float layer0_zeroToOne = (layer0_dotProduct_vertical+1.0)/2.0;
+
+    // ==================================================
+
+    outputPerlinTexture[id.xy] = float4(
+        layer0_dotProduct_vertical,
+        layer0_dotProduct_vertical,
+        layer0_dotProduct_vertical,
+        1.0
+    );
+
+    // ==================================================
+}
+
+// ====================================================================================
+// ====================================================================================
