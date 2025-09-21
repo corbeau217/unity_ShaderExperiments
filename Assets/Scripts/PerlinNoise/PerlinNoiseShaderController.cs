@@ -22,10 +22,16 @@ public class PerlinNoiseShaderController : MonoBehaviour
     [Tooltip("the size of our compute shader blocks for the perlin noise generator")]
     public Vector3Int perlinComputeBlockSize = new Vector3Int(16,16,1);
 
-    [Tooltip("the size in pixels of each perlin noise octave, (no more than 4)")]
+    [Tooltip("the size in pixels of each perlin noise octave (maximum of 4 octaves)")]
     public List<Vector2Int> octaveCellSizes = new List<Vector2Int>();
+    [Tooltip("where in the noise space our cells start (maximum of 4 octaves)")]
+    public List<Vector2Int> octaveCellOffsets = new List<Vector2Int>();
+    [Tooltip("how much the octave effects the resulting noise (maximum of 4 octaves)")]
+    public List<float> octaveInfluences = new List<float>();
     // this is hard coded by what is in the shader
     private int maximumOctaveCount = 4;
+    // show how many layers were noticed
+    public int octaveHasDataCount = 0;
     
     
     void Start(){
@@ -119,11 +125,32 @@ public class PerlinNoiseShaderController : MonoBehaviour
             perlinOutputResolution.y / perlinComputeBlockSize.y,
             perlinComputeBlockSize.z
         );
+        octaveHasDataCount = Mathf.Min( maximumOctaveCount,
+            Mathf.Max(
+                octaveCellSizes.Count,
+                Mathf.Max(
+                    octaveCellOffsets.Count,
+                    octaveInfluences.Count
+                )
+            )
+        );
 
         int[] octaveCellSizesArray = new int[maximumOctaveCount*2];
-        for(int i = 0; i < octaveCellSizes.Count; i++){
-            octaveCellSizesArray[i*2] = octaveCellSizes[i].x;
-            octaveCellSizesArray[i*2+1] = octaveCellSizes[i].y;
+        int[] octaveCellOffsetsArray = new int[maximumOctaveCount*2];
+        float[] octaveInfluencesArray = new float[maximumOctaveCount];
+
+        for(int i = 0; i < maximumOctaveCount; i++){
+            // if(i < octaveCellSizes.Count){
+                octaveCellSizesArray[i*2] = octaveCellSizes[i].x;
+                octaveCellSizesArray[i*2+1] = octaveCellSizes[i].y;
+            // }
+            // if(i < octaveCellOffsets.Count){
+                octaveCellOffsetsArray[i*2] = octaveCellOffsets[i].x;
+                octaveCellOffsetsArray[i*2+1] = octaveCellOffsets[i].y;
+            // }
+            // if(i < octaveInfluences.Count){
+                octaveInfluencesArray[i] = octaveInfluences[i];
+            // }
         }
 
         // ================================================================================================================
@@ -131,8 +158,12 @@ public class PerlinNoiseShaderController : MonoBehaviour
         perlinNoiseShader.SetTexture(perlinKernelIndex, "inputNoiseTexture", inputNoiseTexture);
         perlinNoiseShader.SetTexture(perlinKernelIndex, "outputPerlinTexture", outputPerlinTexture);
         perlinNoiseShader.SetInts("perlinOutputResolution", perlinOutputResolutionArray);
+
         perlinNoiseShader.SetInts("octaveCellSizes", octaveCellSizesArray);
-        perlinNoiseShader.SetInt("octaveCount", octaveCellSizes.Count);
+        perlinNoiseShader.SetInts("octaveCellOffsets", octaveCellOffsetsArray);
+        perlinNoiseShader.SetFloats("octaveInfluences", octaveInfluencesArray);
+        
+        perlinNoiseShader.SetInt("octaveLayerUsageCount", octaveHasDataCount);
 
         // ================================================================================================================
 

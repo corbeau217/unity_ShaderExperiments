@@ -2,17 +2,29 @@
 #pragma kernel InputNoiseKernel
 #pragma kernel PerlinNoiseKernel
 
+// when we care about debugging
+#define isDebugMode 0
+
 // pi to 24 significant figures
-#define pi_24sf 3.141592653589793238462643 //38327950288419716939937510582097494459230781640628
+//                3.14159265358979323846264338327950288419716939937510582097494459230781640628
+#define F_PI_24SF 3.141592653589793238462643
 // tau (2*pi) to 24 significant figures
-#define tau_24sf 6.283185307179586476925287
+#define F_TAU_24SF 6.283185307179586476925287
 
-#define maximum_octaves 4
+#define I_Maximum_Octaves 4
 
-#define index_offset_bottom_left uint2(0,0)
-#define index_offset_bottom_right uint2(1,0)
-#define index_offset_top_left uint2(0,1)
-#define index_offset_top_right uint2(1,1)
+#define U2_Index_Offset_Bottom_Left uint2(0,0)
+#define U2_Index_Offset_Bottom_Right uint2(1,0)
+#define U2_Index_Offset_Top_Left uint2(0,1)
+#define U2_Index_Offset_Top_Right uint2(1,1)
+
+// this is incase we have the wacky float values
+//  like 0.000001 because floating point precision
+//  do be wacky
+//     https://en.wikipedia.org/wiki/Floating-point_arithmetic
+#define F_Float_Forgiveness 0.0002
+// this is for testing if it's going below 0
+#define F_Minimum_Noise_Value 0.0
 
 // Create a RenderTexture with enableRandomWrite flag and set it
 // with cs.SetTexture
@@ -22,8 +34,10 @@ RWTexture2D<float4> outputPerlinTexture;
 int2 inputNoiseResolution;
 int2 perlinOutputResolution;
 
-int2 octaveCellSizes[maximum_octaves];
-int octaveCount;
+int2 octaveCellSizes[I_Maximum_Octaves];
+int2 octaveCellOffsets[I_Maximum_Octaves];
+float octaveInfluences[I_Maximum_Octaves];
+int octaveLayerUsageCount;
 
 // ====================================================================================
 // ====================================================================================
@@ -35,7 +49,7 @@ float randomValue(float2 uvCoordinates){
 
 // circleT is between 0.0 and 1.0 inclusive, as a rotation around a full circle
 float2 pointOnCircle(float circleT){
-    float radiansT = circleT * tau_24sf;
+    float radiansT = circleT * F_TAU_24SF;
     // for now just use trig, whomst even care
     return float2(cos(radiansT),sin(radiansT));
 }
@@ -43,7 +57,7 @@ float2 pointOnCircle(float circleT){
 // ====================================================================================
 // ====================================================================================
 
-float2 cellCoords(float2 texelCoord, float2 layerCellSize, float2 layerOrigin){
+float2 texelToLayerSpace(float2 texelCoord, float2 layerCellSize, float2 layerOrigin){
     return float2(
         (texelCoord.x / layerCellSize.x) + layerOrigin.x,
         (texelCoord.y / layerCellSize.y) + layerOrigin.y
@@ -65,6 +79,7 @@ float2 cellCornerVector(float2 cellCoords, uint2 indexOffset){
         (((uint)floor(cellCoords.x))+indexOffset.x) % ((uint)inputNoiseResolution.x),
         (((uint)floor(cellCoords.y))+indexOffset.y) % ((uint)inputNoiseResolution.y)
     );
+    // TODO : grab yz as an already figured out and saved point on the circle
     // grab that noise value
     float noiseSample = inputNoiseTexture[cornerTexel.xy].x;
     // make it a vector
@@ -81,6 +96,48 @@ float hermiteInterpolation(float leftValue, float rightValue, float t){
     float hermiteT = ((6*t - 15)*t + 10)*t*t*t;
     // do the interpolation
     return lerp(leftValue, rightValue, hermiteT);
+}
+float noiseForLayer(float2 layerSpaceTexel){
+    // ==================================================
+    
+    // find where we are within the cell for this layer
+
+    float2 whereInTheCell = float2( frac(layerSpaceTexel.x), frac(layerSpaceTexel.y) );
+
+    // where is the current fragment (the texel/pixel) in relation to our cell corners
+
+    float2 cornerToFragVector_bottom_left = cornerToFrag(whereInTheCell, U2_Index_Offset_Bottom_Left);
+    float2 cornerToFragVector_bottom_right = cornerToFrag(whereInTheCell, U2_Index_Offset_Bottom_Right);
+    float2 cornerToFragVector_top_left = cornerToFrag(whereInTheCell, U2_Index_Offset_Top_Left);
+    float2 cornerToFragVector_top_right = cornerToFrag(whereInTheCell, U2_Index_Offset_Top_Right);
+
+    // what are the vectors at our cell corners (grid intersections)
+
+    float2 cornerVector_bottom_left = cellCornerVector(layerSpaceTexel, U2_Index_Offset_Bottom_Left);
+    float2 cornerVector_bottom_right = cellCornerVector(layerSpaceTexel, U2_Index_Offset_Bottom_Right);
+    float2 cornerVector_top_left = cellCornerVector(layerSpaceTexel, U2_Index_Offset_Top_Left);
+    float2 cornerVector_top_right = cellCornerVector(layerSpaceTexel, U2_Index_Offset_Top_Right);
+
+    // dot product our corner vectors and cornerToFrag vectors
+
+    float dotProduct_bottom_left = dot( cornerToFragVector_bottom_left, cornerVector_bottom_left );
+    float dotProduct_bottom_right = dot( cornerToFragVector_bottom_right, cornerVector_bottom_right );
+    float dotProduct_top_left = dot( cornerToFragVector_top_left, cornerVector_top_left );
+    float dotProduct_top_right = dot( cornerToFragVector_top_right, cornerVector_top_right );
+
+    // ==================================================
+
+    // then do interpolation
+    //  we do smooth step here to reduce edge weirdness
+    
+    float dotProduct_bottom = hermiteInterpolation(dotProduct_bottom_left, dotProduct_bottom_right, whereInTheCell.x);
+    float dotProduct_top = hermiteInterpolation(dotProduct_top_left, dotProduct_top_right, whereInTheCell.x);
+
+    float dotProduct_vertical = hermiteInterpolation(dotProduct_bottom, dotProduct_top, whereInTheCell.y);
+
+    return dotProduct_vertical;
+
+    // ==================================================
 }
 
 // ====================================================================================
@@ -121,56 +178,103 @@ void PerlinNoiseKernel (uint3 id : SV_DispatchThreadID)
 
     // ==================================================
     // TODO : move the vector making to input noise gen
-    // TODO : handle layer offsets
-    // TODO : handle wrapping the layer texel coords
 
-    float2 layer0_texelCoord = cellCoords( texelLocation, octaveCellSizes[0], float2(0.0,0.0));
+    // prepare our layer referencing
 
-    // ==================================================
-    
-    // find where in the cell
+    float2 layer0_cellSize = float2( octaveCellSizes[0].x, octaveCellSizes[0].y );
+    float2 layer1_cellSize = float2( octaveCellSizes[1].x, octaveCellSizes[1].y );
+    float2 layer2_cellSize = float2( octaveCellSizes[2].x, octaveCellSizes[2].y );
+    float2 layer3_cellSize = float2( octaveCellSizes[3].x, octaveCellSizes[3].y );
 
-    float2 layer0_whereInTheCell = float2( frac(layer0_texelCoord.x), frac(layer0_texelCoord.y) );
+    float2 layer0_offset = float2( octaveCellOffsets[0].x, octaveCellOffsets[0].y );
+    float2 layer1_offset = float2( octaveCellOffsets[1].x, octaveCellOffsets[1].y );
+    float2 layer2_offset = float2( octaveCellOffsets[2].x, octaveCellOffsets[2].y );
+    float2 layer3_offset = float2( octaveCellOffsets[3].x, octaveCellOffsets[3].y );
 
-    // what are our corner vectors
+    float2 layer0_fragCoord = (texelLocation / layer0_cellSize) + layer0_offset;
+    float2 layer1_fragCoord = (texelLocation / layer1_cellSize) + layer1_offset;
+    float2 layer2_fragCoord = (texelLocation / layer2_cellSize) + layer2_offset;
+    float2 layer3_fragCoord = (texelLocation / layer3_cellSize) + layer3_offset;
 
-    float2 layer0_cornerToFragVector_bottom_left = cornerToFrag(layer0_whereInTheCell, index_offset_bottom_left);
-    float2 layer0_cornerToFragVector_bottom_right = cornerToFrag(layer0_whereInTheCell, index_offset_bottom_right);
-    float2 layer0_cornerToFragVector_top_left = cornerToFrag(layer0_whereInTheCell, index_offset_top_left);
-    float2 layer0_cornerToFragVector_top_right = cornerToFrag(layer0_whereInTheCell, index_offset_top_right);
+    float layer0_noise = noiseForLayer(layer0_fragCoord);
+    float layer1_noise = noiseForLayer(layer1_fragCoord);
+    float layer2_noise = noiseForLayer(layer2_fragCoord);
+    float layer3_noise = noiseForLayer(layer3_fragCoord);
 
-    // what are our corner vectors
+    float combinedNoise = ((octaveInfluences[0] * layer0_noise) + (octaveInfluences[1] * layer1_noise) + (octaveInfluences[2] * layer2_noise) + (octaveInfluences[3] * layer3_noise));
 
-    float2 layer0_cornerVector_bottom_left = cellCornerVector(layer0_texelCoord, index_offset_bottom_left);
-    float2 layer0_cornerVector_bottom_right = cellCornerVector(layer0_texelCoord, index_offset_bottom_right);
-    float2 layer0_cornerVector_top_left = cellCornerVector(layer0_texelCoord, index_offset_top_left);
-    float2 layer0_cornerVector_top_right = cellCornerVector(layer0_texelCoord, index_offset_top_right);
+    float totalInfluence = octaveInfluences[0] + octaveInfluences[1] + octaveInfluences[2] + octaveInfluences[3];
 
-    // dot product our corner vectors and corner to frag vectors
-
-    float layer0_dotProduct_bottom_left = dot( layer0_cornerToFragVector_bottom_left, layer0_cornerVector_bottom_left );
-    float layer0_dotProduct_bottom_right = dot( layer0_cornerToFragVector_bottom_right, layer0_cornerVector_bottom_right );
-    float layer0_dotProduct_top_left = dot( layer0_cornerToFragVector_top_left, layer0_cornerVector_top_left );
-    float layer0_dotProduct_top_right = dot( layer0_cornerToFragVector_top_right, layer0_cornerVector_top_right );
-
-    // then do interpolation
-    //  we'd do smooth step here to reduce edge weirdness
-    
-    float layer0_dotProduct_bottom = hermiteInterpolation(layer0_dotProduct_bottom_left, layer0_dotProduct_bottom_right, layer0_whereInTheCell.x);
-    float layer0_dotProduct_top = hermiteInterpolation(layer0_dotProduct_top_left, layer0_dotProduct_top_right, layer0_whereInTheCell.x);
-
-    float layer0_dotProduct_vertical = hermiteInterpolation(layer0_dotProduct_bottom, layer0_dotProduct_top, layer0_whereInTheCell.y);
-
-    float layer0_zeroToOne = (layer0_dotProduct_vertical+1.0)/2.0;
 
     // ==================================================
+    // prepare debug values
+    //  using the suffering looking 'ternary operator'
+    //  for neat "in line" coding to avoid
+    //  compatibility / compilation spookies
+    // 
+    //  (usually false is 0 and true is 1 in C based
+    //   languages but we cant be certain it's compiling
+    //   weird on other devices/hardware)
+    // 
+    //  probably could macro the this with preprocessor
 
-    outputPerlinTexture[id.xy] = float4(
-        layer0_dotProduct_vertical,
-        layer0_dotProduct_vertical,
-        layer0_dotProduct_vertical,
-        1.0
+    int debugFlag_octaveCountTooSmall = ( octaveLayerUsageCount <= 0 )?1:0;
+    int debugFlag_totalInfluenceZero = ( totalInfluence <= F_Float_Forgiveness )?1:0;
+    int debugFlag_combinedNoiseLessThanMinumum = ( combinedNoise < F_Minimum_Noise_Value )?1:0;
+    int debugFlag_anyFlagSet = ( ( debugFlag_octaveCountTooSmall != 0 )||( debugFlag_totalInfluenceZero != 0 )||( debugFlag_combinedNoiseLessThanMinumum != 0 ) )?1:0;
+    // for debugging our spooky situations
+    float4 debugStatusColour = float4(
+        debugFlag_octaveCountTooSmall,
+        debugFlag_totalInfluenceZero,
+        debugFlag_combinedNoiseLessThanMinumum,
+        debugFlag_anyFlagSet
     );
+
+
+    // ==================================================
+
+    // --------------------------------------------------------
+    // check for debug mode
+    if( isDebugMode != 0 ){
+        // .....................................
+
+        // output debug colour
+        outputPerlinTexture[id.xy] = debugStatusColour;
+
+        // .....................................
+    }
+    // --------------------------------------------------------
+    // otherwise not debug mode
+    else {
+        // .....................................
+
+        // check for spooky total influence
+        if( debugFlag_totalInfluenceZero != 0 && combinedNoise > 0 ){
+            // save standard combined
+            outputPerlinTexture[id.xy] = float4(
+                combinedNoise,
+                combinedNoise,
+                combinedNoise,
+                1.0
+            );
+        }
+        // otherwise use squashed noise
+        else {
+            // squash it to be between -1 and 1
+            //  then shift the range to be 0 to 1
+            float repositionedNoise = ((combinedNoise / totalInfluence) + 1.0) / 2.0;
+            // save it to our output
+            outputPerlinTexture[id.xy] = float4(
+                repositionedNoise,
+                repositionedNoise,
+                repositionedNoise,
+                1.0
+            );
+        }
+
+        // .....................................
+    }
+    // --------------------------------------------------------
 
     // ==================================================
 }

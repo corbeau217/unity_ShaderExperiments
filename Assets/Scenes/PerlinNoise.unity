@@ -572,6 +572,16 @@ MonoBehaviour:
   - {x: 32, y: 32}
   - {x: 16, y: 16}
   - {x: 8, y: 8}
+  octaveCellOffsets:
+  - {x: 0, y: 0}
+  - {x: 52, y: 52}
+  - {x: 162, y: 162}
+  - {x: 13, y: 13}
+  octaveInfluences:
+  - 1
+  - 0.5
+  - 0.25
+  - 0.125
 --- !u!4 &2034572838
 Transform:
   m_ObjectHideFlags: 0
